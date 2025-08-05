@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 @app.route("/", methods=["GET"])
@@ -21,7 +20,7 @@ def handle_webhook():
 
     # Check for secret token if configured
     if WEBHOOK_SECRET:
-        token = request.headers.get("X-Webhook-Token")  # Customizable header name
+        token = request.headers.get("X-Webhook-Token")  # Change to match Jira header if needed
         if token != WEBHOOK_SECRET:
             print("Invalid webhook token.")
             return jsonify({"error": "Unauthorized"}), 401
@@ -43,10 +42,11 @@ def handle_webhook():
     print("\nRaw Body:")
     print(request.data.decode("utf-8"))
 
-    # Extract useful fields
-    issue_key = data.get("key")
-    summary = data.get("summary")
-    status = data.get("status")
+    # Parse Jira fields (if structure matches)
+    issue = data.get("issue", {})
+    issue_key = issue.get("key")
+    summary = issue.get("fields", {}).get("summary")
+    status = issue.get("fields", {}).get("status", {}).get("name")
 
     print("\nParsed JSON:")
     print(f"Issue Key: {issue_key}")
