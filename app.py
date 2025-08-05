@@ -14,18 +14,41 @@ def health_check():
 
 @app.route("/", methods=["POST"])
 def handle_webhook():
-    token = request.headers.get("X-Webhook-Token")
-    if token != WEBHOOK_SECRET:
-        return jsonify({"error": "Unauthorized"}), 401
+    # Debug: Print headers for analysis
+    print("Headers Received:")
+    for header, value in request.headers.items():
+        print(f"{header}: {value}")
 
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "Invalid or missing JSON"}), 400
+    # Check for secret token if configured
+    if WEBHOOK_SECRET:
+        token = request.headers.get("X-Webhook-Token")  # Customizable header name
+        if token != WEBHOOK_SECRET:
+            print("Invalid webhook token.")
+            return jsonify({"error": "Unauthorized"}), 401
+    else:
+        print("No WEBHOOK_SECRET set in environment. Skipping token check.")
 
+    # Check content type
+    if not request.is_json:
+        print("Request is not JSON.")
+        return jsonify({"error": "Expected application/json"}), 400
+
+    try:
+        data = request.get_json()
+    except Exception as e:
+        print(f"Error parsing JSON: {e}")
+        return jsonify({"error": "Malformed JSON"}), 400
+
+    # Print raw body for full inspection (useful for debugging)
+    print("\nRaw Body:")
+    print(request.data.decode("utf-8"))
+
+    # Extract useful fields
     issue_key = data.get("key")
     summary = data.get("summary")
     status = data.get("status")
 
+    print("\nParsed JSON:")
     print(f"Issue Key: {issue_key}")
     print(f"Summary: {summary}")
     print(f"Status: {status}")
@@ -33,4 +56,6 @@ def handle_webhook():
     return jsonify({"message": "Webhook received successfully"}), 200
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    port = int(os.environ.get("PORT", 5000))
+    print(f"Starting server on port {port}...")
+    app.run(debug=True, host="0.0.0.0", port=port)
