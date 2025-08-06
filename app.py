@@ -39,8 +39,15 @@ def handle_webhook():
         return jsonify({"error": "Malformed JSON"}), 400
 
     # Debug: Print the raw JSON body
-    repo_name = data.get("repo_name") or (data.get("labels", [None])[0])
+    repo_name = data.get("repo_name")
+    if not repo_name:
+        issue = data.get("issue", {})
+        labels = issue.get("labels", [])
+        repo_name = labels[0] if labels else None
+
     repo_url = f"https://bitbucket.org/ballebaazi/{repo_name}" if repo_name else "N/A"
+    print(f"Repo Name: {repo_name}", flush=True)
+    print(f"Repo URL: {repo_url}", flush=True)
 
     # Print raw body for full inspection (useful for debugging)
     print("\nRaw Body:", flush=True)
