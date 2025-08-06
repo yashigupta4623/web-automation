@@ -57,7 +57,22 @@ def handle_webhook():
     print(f"Assignee: {assignee}", flush=True)
     print(f"Status: {status}", flush=True)
 
-    return jsonify({"message": "Webhook received successfully"}), 200
+    repo_name = data.get("repo_name")
+    repo_url = f"https://bitbucket.org/ballebaazi/{repo_name}" if repo_name else "N/A"
+
+    print(f"Repo Name: {repo_name}", flush=True)
+    print(f"Repo URL: {repo_url}", flush=True)
+
+    return jsonify({
+        "message": "Webhook received successfully",
+        "issue_key": issue_key,
+        "summary": summary,
+        "reporter": reporter,
+        "assignee": assignee,
+        "status": status,
+        "repo_name": repo_name,
+        "repo_url": repo_url
+    }), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
