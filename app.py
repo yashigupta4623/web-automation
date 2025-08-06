@@ -42,15 +42,19 @@ def handle_webhook():
     print("\nRaw Body:")
     print(request.data.decode("utf-8"))
 
-    # Parse Jira fields (if structure matches)
+    # Parse Jira fields (custom structure)
     issue = data.get("issue", {})
     issue_key = issue.get("key")
-    summary = issue.get("fields", {}).get("summary")
-    status = issue.get("fields", {}).get("status", {}).get("name")
+    summary = issue.get("summary")
+    reporter = issue.get("reporter")
+    assignee = issue.get("assignee")
+    status = data.get("status")
 
     print("\nParsed JSON:")
     print(f"Issue Key: {issue_key}")
     print(f"Summary: {summary}")
+    print(f"Reporter: {reporter}")
+    print(f"Assignee: {assignee}")
     print(f"Status: {status}")
 
     return jsonify({"message": "Webhook received successfully"}), 200
