@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import os
 from dotenv import load_dotenv
+import json
 
 load_dotenv()
 
@@ -38,9 +39,16 @@ def handle_webhook():
         print(f"Error parsing JSON: {e}", flush=True)
         return jsonify({"error": "Malformed JSON"}), 400
 
-    # Print raw body for full inspection (useful for debugging)
+    raw_body = request.data.decode("utf-8")
     print("\nRaw Body:", flush=True)
-    print(request.data.decode("utf-8"), flush=True)
+    print(raw_body, flush=True)
+
+    try:
+        raw_json = json.loads(raw_body)
+        repo_name = raw_json.get("repo_name")
+    except Exception as e:
+        print(f"Error extracting repo_name from raw JSON: {e}", flush=True)
+        repo_name = None
 
     # Parse Jira fields (custom structure)
     issue = data.get("issue", {})
@@ -50,10 +58,6 @@ def handle_webhook():
     assignee = issue.get("assignee")
     status = data.get("status")
 
-    repo_name = data.get("repo_name")
-    if not repo_name:
-        labels = issue.get("labels", [])
-        repo_name = labels[0] if labels else None
     repo_url = f"https://bitbucket.org/ballebaazi/{repo_name}" if repo_name else "N/A"
 
     print("\nParsed JSON:", flush=True)
