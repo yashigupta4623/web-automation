@@ -50,17 +50,17 @@ def handle_webhook():
     assignee = issue.get("assignee")
     status = data.get("status")
 
+
+    labels = data.get("labels", [])
+    repo_name = labels[0] if labels else None
+    repo_url = f"https://bitbucket.org/ballebaazi/{repo_name}" if repo_name else "N/A"
+
     print("\nParsed JSON:", flush=True)
     print(f"Issue Key: {issue_key}", flush=True)
     print(f"Summary: {summary}", flush=True)
     print(f"Reporter: {reporter}", flush=True)
     print(f"Assignee: {assignee}", flush=True)
     print(f"Status: {status}", flush=True)
-
-    labels = data.get("labels", [])
-    repo_name = labels[0] if labels else None
-    repo_url = f"https://bitbucket.org/ballebaazi/{repo_name}" if repo_name else "N/A"
-
     print(f"Repo Name (from label): {repo_name}", flush=True)
     print(f"Repo URL: {repo_url}", flush=True)
 
