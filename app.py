@@ -29,11 +29,9 @@ JIRA_BASE_URL = os.getenv("JIRA_BASE_URL")
 JIRA_AUTH_EMAIL = os.getenv("JIRA_AUTH_EMAIL")
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
 
-
 @app.route("/", methods=["GET"])
 def health_check():
     return jsonify({"message": "Webhook listener is up"}), 200
-
 
 @app.route("/", methods=["POST"])
 def handle_webhook():
@@ -65,24 +63,24 @@ def handle_webhook():
     assignee = issue.get("assignee")
     status = data.get("status")
 
-    # Try repo_name from top-level, then labels, then fallback to summary parsing
-    repo_name = data.get("repo_name")
-    if not repo_name:
-        labels = issue.get("labels", [])
-        if labels:
-            repo_name = labels[0]
-        else:
-            match = re.search(r"access to ([\w\-]+)", summary)
-            if match:
-                repo_name = match.group(1)
+    # Try different methods to extract repo_name
+    # repo_name = data.get("repo_name")
+    # if not repo_name:
+    #     labels = issue.get("labels", [])
+    #     repo_name = labels[0] if labels else None
+    # if not repo_name:
+    #     match = re.search(r"access to (\\S+)", summary)
+    #     repo_name = match.group(1) if match else None
 
-    username = data.get("username")
-    permission = data.get("permission")
+    # Hardcoded values
+    username = "varun.singh@sportsbaazi.com"
+    permission = "write"
+    repo_name = "bb-devops"
 
     logging.info(f"Issue: {issue_key}, Repo: {repo_name}, User: {username}, Permission: {permission}")
 
-    if not all([repo_name, username, permission]):
-        comment = "❌ Missing repo name, permission, or username."
+    if not repo_name:
+        comment = "❌ Missing repo name."
         logging.error(comment)
         add_jira_comment(issue_key, comment)
         return jsonify({"error": "Missing required fields"}), 400
@@ -114,7 +112,6 @@ def handle_webhook():
 
     return jsonify({"message": "Webhook processed"}), 200
 
-
 def add_jira_comment(issue_key, comment):
     if not all([JIRA_BASE_URL, JIRA_AUTH_EMAIL, JIRA_API_TOKEN]):
         logging.warning("Jira credentials not set, skipping comment.")
@@ -133,7 +130,6 @@ def add_jira_comment(issue_key, comment):
             logging.error(f"Failed to add comment: {response.status_code}, {response.text}")
     except Exception as e:
         logging.exception(f"Error posting comment to Jira: {e}")
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
