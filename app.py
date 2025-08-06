@@ -2,85 +2,128 @@ from flask import Flask, request, jsonify
 import os
 from dotenv import load_dotenv
 import json
+import requests
+from requests.auth import HTTPBasicAuth
+import logging
 
+# Load environment variables
 load_dotenv()
 
+# Setup logging
+logging.basicConfig(
+    filename="webhook_test.log",
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+
 app = Flask(__name__)
+
+# Secrets
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
+BITBUCKET_WORKSPACE = os.getenv("BITBUCKET_WORKSPACE")
+BITBUCKET_USERNAME = os.getenv("BITBUCKET_USERNAME")
+BITBUCKET_APP_PASSWORD = os.getenv("BITBUCKET_APP_PASSWORD")
+JIRA_BASE_URL = os.getenv("JIRA_BASE_URL")
+JIRA_AUTH_EMAIL = os.getenv("JIRA_AUTH_EMAIL")
+JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
+
 
 @app.route("/", methods=["GET"])
 def health_check():
     return jsonify({"message": "Webhook listener is up"}), 200
 
+
 @app.route("/", methods=["POST"])
 def handle_webhook():
-    # Debug: Print headers for analysis
-    print("Headers Received:", flush=True)
-    for header, value in request.headers.items():
-        print(f"{header}: {value}", flush=True)
+    logging.info("Received webhook call")
 
-    # Check for secret token if configured
     if WEBHOOK_SECRET:
-        token = request.headers.get("X-Webhook-Token")  # Change to match Jira header if needed
+        token = request.headers.get("X-Webhook-Token")
         if token != WEBHOOK_SECRET:
-            print("Invalid webhook token.", flush=True)
+            logging.warning("Invalid webhook token.")
             return jsonify({"error": "Unauthorized"}), 401
-    else:
-        print("No WEBHOOK_SECRET set in environment. Skipping token check.", flush=True)
 
-    # Check content type
     if not request.is_json:
-        print("Request is not JSON.", flush=True)
+        logging.error("Request is not JSON")
         return jsonify({"error": "Expected application/json"}), 400
 
     try:
         data = request.get_json()
     except Exception as e:
-        print(f"Error parsing JSON: {e}", flush=True)
+        logging.error(f"Error parsing JSON: {e}")
         return jsonify({"error": "Malformed JSON"}), 400
 
-    raw_body = request.data.decode("utf-8")
-    print("\nRaw Body:", flush=True)
-    print(raw_body, flush=True)
+    logging.info(f"Raw Body: {request.data.decode('utf-8')}")
 
-    try:
-        raw_json = json.loads(raw_body)
-        repo_name = raw_json.get("repo_name")
-    except Exception as e:
-        print(f"Error extracting repo_name from raw JSON: {e}", flush=True)
-        repo_name = None
-
-    # Parse Jira fields (custom structure)
+    # Parse fields
     issue = data.get("issue", {})
     issue_key = issue.get("key")
     summary = issue.get("summary")
     reporter = issue.get("reporter")
     assignee = issue.get("assignee")
     status = data.get("status")
+    repo_name = data.get("repo_name")
+    permission = data.get("permission")
+    username = data.get("username")
 
-    repo_url = f"https://bitbucket.org/ballebaazi/{repo_name}" if repo_name else "N/A"
+    logging.info(f"Issue: {issue_key}, Repo: {repo_name}, User: {username}, Permission: {permission}")
 
-    print("\nParsed JSON:", flush=True)
-    print(f"Issue Key: {issue_key}", flush=True)
-    print(f"Summary: {summary}", flush=True)
-    print(f"Reporter: {reporter}", flush=True)
-    print(f"Assignee: {assignee}", flush=True)
-    print(f"Status: {status}", flush=True)
-    print(f"Repo Name (from label or top-level): {repo_name}", flush=True)
-    print(f"Repo URL: {repo_url}", flush=True)
+    if not all([repo_name, username, permission]):
+        comment = "❌ Missing repo name, permission, or username."
+        logging.error(comment)
+        add_jira_comment(issue_key, comment)
+        return jsonify({"error": "Missing required fields"}), 400
 
-    return jsonify({
-        "message": "Webhook received successfully",
-        "issue_key": issue_key,
-        "summary": summary,
-        "reporter": reporter,
-        "assignee": assignee,
-        "status": status,
-        "repo_name": repo_name,
-        "repo_url": repo_url
-    }), 200
+    # Bitbucket API call
+    api_url = f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}/{repo_name}/permissions-config/users/{username}"
+
+    try:
+        response = requests.put(
+            api_url,
+            auth=HTTPBasicAuth(BITBUCKET_USERNAME, BITBUCKET_APP_PASSWORD),
+            headers={"Content-Type": "application/json"},
+            json={"permission": permission}
+        )
+
+        if response.status_code in [200, 201, 204]:
+            msg = f"✅ Granted `{permission}` access to `{username}` on repo `{repo_name}`."
+            logging.info(msg)
+            add_jira_comment(issue_key, msg)
+        else:
+            msg = f"❌ Failed to grant permission: {response.status_code}, {response.text}"
+            logging.error(msg)
+            add_jira_comment(issue_key, msg)
+
+    except Exception as e:
+        error_msg = f"❌ Error during Bitbucket API call: {str(e)}"
+        logging.exception(error_msg)
+        add_jira_comment(issue_key, error_msg)
+
+    return jsonify({"message": "Webhook processed"}), 200
+
+
+def add_jira_comment(issue_key, comment):
+    if not all([JIRA_BASE_URL, JIRA_AUTH_EMAIL, JIRA_API_TOKEN]):
+        logging.warning("Jira credentials not set, skipping comment.")
+        return
+
+    url = f"{JIRA_BASE_URL}/rest/api/3/issue/{issue_key}/comment"
+    auth = HTTPBasicAuth(JIRA_AUTH_EMAIL, JIRA_API_TOKEN)
+    headers = {"Content-Type": "application/json"}
+    payload = {"body": comment}
+
+    try:
+        response = requests.post(url, headers=headers, auth=auth, json=payload)
+        if response.status_code in [200, 201]:
+            logging.info(f"📝 Comment added to {issue_key}")
+        else:
+            logging.error(f"Failed to add comment: {response.status_code}, {response.text}")
+    except Exception as e:
+        logging.exception(f"Error posting comment to Jira: {e}")
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"Starting server on port {port}...", flush=True)
+    logging.info(f"Starting server on port {port}")
     app.run(debug=True, host="0.0.0.0", port=port)
