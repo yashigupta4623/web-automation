@@ -5,6 +5,7 @@ import json
 import requests
 from requests.auth import HTTPBasicAuth
 import logging
+import re
 
 # Load environment variables
 load_dotenv()
@@ -59,13 +60,24 @@ def handle_webhook():
     # Parse fields
     issue = data.get("issue", {})
     issue_key = issue.get("key")
-    summary = issue.get("summary")
+    summary = issue.get("summary", "")
     reporter = issue.get("reporter")
     assignee = issue.get("assignee")
     status = data.get("status")
+
+    # Try repo_name from top-level, then labels, then fallback to summary parsing
     repo_name = data.get("repo_name")
-    permission = data.get("permission")
+    if not repo_name:
+        labels = issue.get("labels", [])
+        if labels:
+            repo_name = labels[0]
+        else:
+            match = re.search(r"access to ([\w\-]+)", summary)
+            if match:
+                repo_name = match.group(1)
+
     username = data.get("username")
+    permission = data.get("permission")
 
     logging.info(f"Issue: {issue_key}, Repo: {repo_name}, User: {username}, Permission: {permission}")
 
