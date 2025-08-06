@@ -58,7 +58,7 @@ def handle_webhook():
     summary = issue.get("summary", "")
     logging.info(f"Issue: {issue_key}, Summary: {summary}")
 
-    # Hardcoded values
+    # Hardcoded values for testing
     repo_name = "bb-devops"
     username = "varun.singh@sportsbaazi.com"
     permission = "write"
@@ -111,6 +111,6 @@ def add_jira_comment(issue_key, comment):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     logging.info(f"🚀 Starting server on port {port}")
     app.run(debug=True, host="0.0.0.0", port=port)
