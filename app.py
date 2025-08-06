@@ -38,17 +38,6 @@ def handle_webhook():
         print(f"Error parsing JSON: {e}", flush=True)
         return jsonify({"error": "Malformed JSON"}), 400
 
-    # Debug: Print the raw JSON body
-    repo_name = data.get("repo_name")
-    if not repo_name:
-        issue = data.get("issue", {})
-        labels = issue.get("labels", [])
-        repo_name = labels[0] if labels else None
-
-    repo_url = f"https://bitbucket.org/ballebaazi/{repo_name}" if repo_name else "N/A"
-    print(f"Repo Name: {repo_name}", flush=True)
-    print(f"Repo URL: {repo_url}", flush=True)
-
     # Print raw body for full inspection (useful for debugging)
     print("\nRaw Body:", flush=True)
     print(request.data.decode("utf-8"), flush=True)
@@ -60,7 +49,11 @@ def handle_webhook():
     reporter = issue.get("reporter")
     assignee = issue.get("assignee")
     status = data.get("status")
-    repo_name = issue.get("labels", [None])[0] if issue.get("labels") else None
+
+    repo_name = data.get("repo_name")
+    if not repo_name:
+        labels = issue.get("labels", [])
+        repo_name = labels[0] if labels else None
     repo_url = f"https://bitbucket.org/ballebaazi/{repo_name}" if repo_name else "N/A"
 
     print("\nParsed JSON:", flush=True)
@@ -69,7 +62,7 @@ def handle_webhook():
     print(f"Reporter: {reporter}", flush=True)
     print(f"Assignee: {assignee}", flush=True)
     print(f"Status: {status}", flush=True)
-    print(f"Repo Name (from label): {repo_name}", flush=True)
+    print(f"Repo Name (from label or top-level): {repo_name}", flush=True)
     print(f"Repo URL: {repo_url}", flush=True)
 
     return jsonify({
