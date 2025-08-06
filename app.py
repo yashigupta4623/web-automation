@@ -101,7 +101,23 @@ def add_jira_comment(issue_key, comment):
     url = f"{JIRA_BASE_URL}/rest/api/3/issue/{issue_key}/comment"
     auth = HTTPBasicAuth(JIRA_AUTH_EMAIL, JIRA_API_TOKEN)
     headers = {"Content-Type": "application/json"}
-    payload = {"body": comment}
+    payload = {
+        "body": {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": comment
+                        }
+                    ]
+                }
+            ]
+        }
+    }
 
     try:
         response = requests.post(url, headers=headers, auth=auth, json=payload)
