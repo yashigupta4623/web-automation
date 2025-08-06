@@ -60,8 +60,8 @@ def handle_webhook():
 
     # Hardcoded values for testing
     repo_name = "bb-devops"
-    username = "varun.singh@sportsbaazi.com"
-    permission = "write"
+    username = "riyasaxena1"
+    permission = "read"
 
     logging.info(f"🔁 Attempting Bitbucket grant: {repo_name}, {username}, {permission}")
 
