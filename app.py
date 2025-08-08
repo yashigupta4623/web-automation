@@ -63,9 +63,32 @@ def handle_webhook():
     username = "riyasaxena1"
     permission = "read"
 
+    # Username presence check
+    if not username:
+        msg = "❌ Username is missing or invalid."
+        logging.warning(msg)
+        add_jira_comment(issue_key, msg)
+        return jsonify({"error": msg}), 400
+
     logging.info(f"🔁 Attempting Bitbucket grant: {repo_name}, {username}, {permission}")
 
     api_url = f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}/{repo_name}/permissions-config/users/{username}"
+
+    import re
+
+    # Simple regex for email validation
+    email_regex = r"[^@]+@[^@]+\.[^@]+"
+    if not re.match(email_regex, username):
+        msg = f"❌ Provided username `{username}` doesn't look like a valid email."
+        logging.warning(msg)
+        add_jira_comment(issue_key, msg)
+        return jsonify({"error": msg}), 400
+
+    if not repo_name:
+        msg = "❌ Repository name is missing or invalid."
+        logging.warning(msg)
+        add_jira_comment(issue_key, msg)
+        return jsonify({"error": msg}), 400
 
     try:
         response = requests.put(
