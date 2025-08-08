@@ -76,14 +76,6 @@ def handle_webhook():
 
     import re
 
-    # Simple regex for email validation
-    email_regex = r"[^@]+@[^@]+\.[^@]+"
-    if not re.match(email_regex, username):
-        msg = f"❌ Provided username `{username}` doesn't look like a valid email."
-        logging.warning(msg)
-        add_jira_comment(issue_key, msg)
-        return jsonify({"error": msg}), 400
-
     if not repo_name:
         msg = "❌ Repository name is missing or invalid."
         logging.warning(msg)
