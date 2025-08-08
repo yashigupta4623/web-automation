@@ -139,39 +139,43 @@ def add_jira_comment(issue_key, comment):
     except Exception as e:
         logging.exception(f"❌ Jira comment post failed: {e}")
 
-def send_credentials_via_email(to_email, access_key, secret_key):
+ddef send_credentials_via_email(to_email, access_key, secret_key):
+    import smtplib
+    from email.message import EmailMessage
+    import logging
+    import os
+
     msg = EmailMessage()
     msg['Subject'] = 'Your AWS CLI Access Credentials'
     msg['From'] = os.getenv("EMAIL_USERNAME")
     msg['To'] = to_email
 
     msg.set_content(f"""
-Hi,
+Hi {to_email},
 
 You've been granted AWS CLI access.
 
-Here are your credentials:
+🔐 Access Key ID: {access_key}
+🔐 Secret Access Key: {secret_key}
 
-Access Key ID: {access_key}
-Secret Access Key: {secret_key}
-
-Please run `aws configure` to set them up. Do not share them with anyone.
+Please run `aws configure` in your terminal and paste these keys when asked.
+Do not share these credentials with anyone.
 
 Best,
 Automation Bot
 """)
 
     try:
-        logging.info(f"📧 Connecting to SMTP server {os.getenv('EMAIL_HOST')}:{os.getenv('EMAIL_PORT')}")
+        logging.info(f"📧 Connecting to SMTP: {os.getenv('EMAIL_HOST')}:{os.getenv('EMAIL_PORT')}")
         with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
-            smtp.set_debuglevel(1)  # detailed SMTP debug output in logs
+            smtp.set_debuglevel(1)  # Print raw SMTP communication to logs
             smtp.starttls()
             smtp.login(os.getenv("EMAIL_USERNAME"), os.getenv("EMAIL_PASSWORD"))
             smtp.send_message(msg)
-        logging.info(f"📧 Email successfully sent to {to_email}")
+        logging.info(f"✅ Email sent to {to_email}")
         return True
     except Exception as e:
-        logging.exception(f"❌ Failed to send email to {to_email} - {e}")
+        logging.exception(f"❌ Failed to send email to {to_email}")
         return False
 
 def create_or_update_aws_user(email, issue_key):
