@@ -4,6 +4,10 @@ from dotenv import load_dotenv
 import requests
 from requests.auth import HTTPBasicAuth
 import logging
+import boto3
+from botocore.exceptions import ClientError
+import smtplib
+from email.message import EmailMessage
 
 # Load environment variables
 load_dotenv()
@@ -27,11 +31,9 @@ JIRA_BASE_URL = os.getenv("JIRA_BASE_URL")
 JIRA_AUTH_EMAIL = os.getenv("JIRA_AUTH_EMAIL")
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
 
-
 @app.route("/", methods=["GET"])
 def health_check():
     return jsonify({"message": "Webhook listener is up"}), 200
-
 
 @app.route("/", methods=["POST"])
 def handle_webhook():
@@ -58,29 +60,36 @@ def handle_webhook():
     summary = issue.get("summary", "")
     logging.info(f"Issue: {issue_key}, Summary: {summary}")
 
-    # Hardcoded values for testing
+    reporter = issue.get("fields", {}).get("reporter", {})
+    reporter_email = reporter.get("emailAddress", "").strip()
+
+    if not reporter_email:
+        msg = "❌ Reporter email not found in issue payload."
+        logging.warning(msg)
+        add_jira_comment(issue_key, msg)
+        return jsonify({"error": msg}), 400
+
+    aws_msg = create_or_update_aws_user(reporter_email, issue_key)
+    add_jira_comment(issue_key, aws_msg)
+
+    # Hardcoded values for Bitbucket
     repo_name = "bb-devops"
     username = "riyasaxena1"
     permission = "read"
 
-    # Username presence check
     if not username:
         msg = "❌ Username is missing or invalid."
         logging.warning(msg)
         add_jira_comment(issue_key, msg)
         return jsonify({"error": msg}), 400
 
-    logging.info(f"🔁 Attempting Bitbucket grant: {repo_name}, {username}, {permission}")
-
-    api_url = f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}/{repo_name}/permissions-config/users/{username}"
-
-    import re
-
     if not repo_name:
         msg = "❌ Repository name is missing or invalid."
         logging.warning(msg)
         add_jira_comment(issue_key, msg)
         return jsonify({"error": msg}), 400
+
+    api_url = f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}/{repo_name}/permissions-config/users/{username}"
 
     try:
         response = requests.put(
@@ -106,7 +115,6 @@ def handle_webhook():
         logging.exception(error_msg)
         add_jira_comment(issue_key, error_msg)
         return jsonify({"error": error_msg}), 500
-
 
 def add_jira_comment(issue_key, comment):
     if not all([JIRA_BASE_URL, JIRA_AUTH_EMAIL, JIRA_API_TOKEN]):
@@ -140,6 +148,81 @@ def add_jira_comment(issue_key, comment):
     except Exception as e:
         logging.exception(f"❌ Jira comment post failed: {e}")
 
+def send_credentials_via_email(to_email, access_key, secret_key):
+    msg = EmailMessage()
+    msg['Subject'] = 'Your AWS CLI Access Credentials'
+    msg['From'] = os.getenv("EMAIL_USERNAME")
+    msg['To'] = to_email
+
+    msg.set_content(f"""
+Hi,
+
+You've been granted AWS CLI access.
+
+Here are your credentials:
+
+Access Key ID: {access_key}
+Secret Access Key: {secret_key}
+
+Please run `aws configure` to set them up. Do not share them with anyone.
+
+Best,
+Automation Bot
+""")
+
+    try:
+        with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
+            smtp.starttls()
+            smtp.login(os.getenv("EMAIL_USERNAME"), os.getenv("EMAIL_PASSWORD"))
+            smtp.send_message(msg)
+        logging.info(f"📧 Email sent to {to_email}")
+        return True
+    except Exception as e:
+        logging.exception(f"❌ Failed to send email to {to_email}")
+        return False
+
+def create_or_update_aws_user(email, issue_key):
+    aws_session = boto3.Session(
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        region_name=os.getenv("AWS_DEFAULT_REGION")
+    )
+
+    iam = aws_session.client("iam")
+    user_name = email.split("@")[0].replace(".", "-")
+
+    try:
+        iam.get_user(UserName=user_name)
+        logging.info(f"👤 IAM user '{user_name}' already exists.")
+    except iam.exceptions.NoSuchEntityException:
+        try:
+            iam.create_user(UserName=user_name)
+            iam.add_user_to_group(GroupName="YourAccessGroup", UserName=user_name)
+            logging.info(f"✅ Created user '{user_name}' and added to group.")
+        except ClientError as e:
+            logging.exception("❌ Error creating IAM user")
+            return f"❌ Failed to create IAM user: {e}"
+
+    try:
+        response = iam.create_access_key(UserName=user_name)
+        access_key = response['AccessKey']['AccessKeyId']
+        secret_key = response['AccessKey']['SecretAccessKey']
+
+        iam.attach_user_policy(
+            UserName=user_name,
+            PolicyArn="arn:aws:iam::aws:policy/ReadOnlyAccess"
+        )
+
+        success = send_credentials_via_email(email, access_key, secret_key)
+
+        if success:
+            return f"✅ AWS CLI access has been emailed to `{email}`."
+        else:
+            return f"⚠️ User created but failed to email `{email}`. Please check logs."
+
+    except ClientError as e:
+        logging.exception("❌ Error generating access key or attaching policy")
+        return f"❌ Error during AWS access key generation: {e}"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
