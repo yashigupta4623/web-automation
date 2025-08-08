@@ -189,8 +189,7 @@ def create_or_update_aws_user(email, issue_key):
     except iam.exceptions.NoSuchEntityException:
         try:
             iam.create_user(UserName=user_name)
-            iam.add_user_to_group(GroupName="YourAccessGroup", UserName=user_name)
-            logging.info(f"✅ Created user '{user_name}' and added to group.")
+            logging.info(f"✅ Created user '{user_name}'.")
         except ClientError as e:
             logging.exception("❌ Error creating IAM user")
             return f"❌ Failed to create IAM user: {e}"
