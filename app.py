@@ -162,12 +162,13 @@ Automation Bot
 """)
 
     try:
-        logging.info(f"📧 Connecting to {os.getenv('EMAIL_HOST')}:{os.getenv('EMAIL_PORT')}")
+        logging.info(f"📧 Connecting to SMTP server {os.getenv('EMAIL_HOST')}:{os.getenv('EMAIL_PORT')}")
         with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
+            smtp.set_debuglevel(1)  # detailed SMTP debug output in logs
             smtp.starttls()
             smtp.login(os.getenv("EMAIL_USERNAME"), os.getenv("EMAIL_PASSWORD"))
             smtp.send_message(msg)
-        logging.info(f"📧 Email sent to {to_email}")
+        logging.info(f"📧 Email successfully sent to {to_email}")
         return True
     except Exception as e:
         logging.exception(f"❌ Failed to send email to {to_email} - {e}")
