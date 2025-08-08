@@ -8,6 +8,8 @@ import boto3
 from botocore.exceptions import ClientError
 import smtplib
 from email.message import EmailMessage
+import threading
+import time
 
 # Load environment variables
 load_dotenv()
@@ -139,7 +141,7 @@ def add_jira_comment(issue_key, comment):
     except Exception as e:
         logging.exception(f"❌ Jira comment post failed: {e}")
 
-ddef send_credentials_via_email(to_email, access_key, secret_key):
+def send_credentials_via_email(to_email, access_key, secret_key):
     import smtplib
     from email.message import EmailMessage
     import logging
@@ -147,7 +149,7 @@ ddef send_credentials_via_email(to_email, access_key, secret_key):
 
     msg = EmailMessage()
     msg['Subject'] = 'Your AWS CLI Access Credentials'
-    msg['From'] = os.getenv("EMAIL_USERNAME")
+    msg['From'] = os.getenv("EMAIL_FROM")
     msg['To'] = to_email
 
     msg.set_content(f"""
@@ -166,11 +168,12 @@ Automation Bot
 """)
 
     try:
-        logging.info(f"📧 Connecting to SMTP: {os.getenv('EMAIL_HOST')}:{os.getenv('EMAIL_PORT')}")
-        with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
+        logging.info(f"📧 Connecting to SMTP: {os.getenv('SMTP_HOST')}:{os.getenv('SMTP_PORT')}")
+        with smtplib.SMTP(os.getenv("SMTP_HOST"), int(os.getenv("SMTP_PORT"))) as smtp:
             smtp.set_debuglevel(1)  # Print raw SMTP communication to logs
-            smtp.starttls()
-            smtp.login(os.getenv("EMAIL_USERNAME"), os.getenv("EMAIL_PASSWORD"))
+            if os.getenv("SMTP_SECURITY", "").upper() == "STARTTLS":
+                smtp.starttls()
+            smtp.login(os.getenv("SMTP_USERNAME"), os.getenv("SMTP_PASSWORD"))
             smtp.send_message(msg)
         logging.info(f"✅ Email sent to {to_email}")
         return True
@@ -212,6 +215,7 @@ def create_or_update_aws_user(email, issue_key):
         success = send_credentials_via_email(email, access_key, secret_key)
 
         if success:
+            threading.Thread(target=revoke_aws_access_key, args=(user_name, access_key)).start()
             return f"✅ AWS CLI access has been emailed to `{email}`."
         else:
             return f"⚠️ User created but failed to email `{email}`. Please check logs."
@@ -219,6 +223,20 @@ def create_or_update_aws_user(email, issue_key):
     except ClientError as e:
         logging.exception("❌ Error generating access key or attaching policy")
         return f"❌ Error during AWS access key generation: {e}"
+
+def revoke_aws_access_key(user_name, access_key_id):
+    time.sleep(60)  # Wait for 1 minute
+    try:
+        iam = boto3.client(
+            "iam",
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+            region_name=os.getenv("AWS_DEFAULT_REGION")
+        )
+        iam.delete_access_key(UserName=user_name, AccessKeyId=access_key_id)
+        logging.info(f"🔒 Access key {access_key_id} for user {user_name} has been deleted after timeout.")
+    except ClientError as e:
+        logging.exception(f"❌ Failed to delete access key {access_key_id} for user {user_name}")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
