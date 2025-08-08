@@ -3,5 +3,3 @@ requests
 python-dotenv
 ngrok
 boto3
-threading
-time
