@@ -59,8 +59,7 @@ def handle_webhook():
     issue_key = issue.get("key", "UNKNOWN")
     summary = issue.get("summary", "")
     logging.info(f"Issue: {issue_key}, Summary: {summary}")
-    reporter_email = "soumyajyoti.das@sportsbaazi.com"
-
+    reporter_email = "riya.saxena@sportsbaazi.com"
     aws_msg = create_or_update_aws_user(reporter_email, issue_key)
     add_jira_comment(issue_key, aws_msg)
 
