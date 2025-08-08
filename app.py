@@ -59,9 +59,7 @@ def handle_webhook():
     issue_key = issue.get("key", "UNKNOWN")
     summary = issue.get("summary", "")
     logging.info(f"Issue: {issue_key}, Summary: {summary}")
-
-    reporter = issue.get("fields", {}).get("reporter", {})
-    reporter_email = reporter.get("emailAddress", "").strip()
+    reporter_email = "yashi.gupta@sportsbaazi.com"
 
     if not reporter_email:
         msg = "❌ Reporter email not found in issue payload."
