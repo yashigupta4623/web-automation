@@ -162,6 +162,7 @@ Automation Bot
 """)
 
     try:
+        logging.info(f"📧 Connecting to {os.getenv('EMAIL_HOST')}:{os.getenv('EMAIL_PORT')}")
         with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
             smtp.starttls()
             smtp.login(os.getenv("EMAIL_USERNAME"), os.getenv("EMAIL_PASSWORD"))
@@ -169,7 +170,7 @@ Automation Bot
         logging.info(f"📧 Email sent to {to_email}")
         return True
     except Exception as e:
-        logging.exception(f"❌ Failed to send email to {to_email}")
+        logging.exception(f"❌ Failed to send email to {to_email} - {e}")
         return False
 
 def create_or_update_aws_user(email, issue_key):
