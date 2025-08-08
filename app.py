@@ -61,12 +61,6 @@ def handle_webhook():
     logging.info(f"Issue: {issue_key}, Summary: {summary}")
     reporter_email = "yashi.gupta@sportsbaazi.com"
 
-    if not reporter_email:
-        msg = "❌ Reporter email not found in issue payload."
-        logging.warning(msg)
-        add_jira_comment(issue_key, msg)
-        return jsonify({"error": msg}), 400
-
     aws_msg = create_or_update_aws_user(reporter_email, issue_key)
     add_jira_comment(issue_key, aws_msg)
 
