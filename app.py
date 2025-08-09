@@ -200,7 +200,7 @@ def create_or_update_aws_user(email, issue_key):
     sts = aws_session.client("sts")
 
     try:
-        response = sts.get_session_token(DurationSeconds=60)
+        response = sts.get_session_token(DurationSeconds=1200)
         credentials = response['Credentials']
         access_key = credentials['AccessKeyId']
         secret_key = credentials['SecretAccessKey']
