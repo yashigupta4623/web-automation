@@ -8,7 +8,6 @@ import boto3
 from botocore.exceptions import ClientError
 import smtplib
 from email.message import EmailMessage
-import threading
 import time
 
 # Load environment variables
@@ -141,7 +140,7 @@ def add_jira_comment(issue_key, comment):
     except Exception as e:
         logging.exception(f"❌ Jira comment post failed: {e}")
 
-def send_credentials_via_email(to_email, access_key, secret_key):
+def send_credentials_via_email(to_email, access_key, secret_key, session_token=None, expiration=None):
     import smtplib
     from email.message import EmailMessage
     import logging
@@ -152,20 +151,30 @@ def send_credentials_via_email(to_email, access_key, secret_key):
     msg['From'] = os.getenv("EMAIL_FROM")
     msg['To'] = to_email
 
-    msg.set_content(f"""
+    content = f"""
 Hi {to_email},
 
 You've been granted AWS CLI access.
 
 🔐 Access Key ID: {access_key}
 🔐 Secret Access Key: {secret_key}
+"""
 
+    if session_token:
+        content += f"🔐 Session Token: {session_token}\n"
+
+    if expiration:
+        content += f"⏰ Credentials expire at: {expiration}\n"
+
+    content += """
 Please run `aws configure` in your terminal and paste these keys when asked.
 Do not share these credentials with anyone.
 
 Best,
 Automation Bot
-""")
+"""
+
+    msg.set_content(content)
 
     try:
         logging.info(f"📧 Connecting to SMTP: {os.getenv('SMTP_HOST')}:{os.getenv('SMTP_PORT')}")
@@ -188,55 +197,26 @@ def create_or_update_aws_user(email, issue_key):
         region_name=os.getenv("AWS_DEFAULT_REGION")
     )
 
-    iam = aws_session.client("iam")
-    user_name = email.split("@")[0].replace(".", "-")
+    sts = aws_session.client("sts")
 
     try:
-        iam.get_user(UserName=user_name)
-        logging.info(f"👤 IAM user '{user_name}' already exists.")
-    except iam.exceptions.NoSuchEntityException:
-        try:
-            iam.create_user(UserName=user_name)
-            logging.info(f"✅ Created user '{user_name}'.")
-        except ClientError as e:
-            logging.exception("❌ Error creating IAM user")
-            return f"❌ Failed to create IAM user: {e}"
+        response = sts.get_session_token(DurationSeconds=60)
+        credentials = response['Credentials']
+        access_key = credentials['AccessKeyId']
+        secret_key = credentials['SecretAccessKey']
+        session_token = credentials['SessionToken']
+        expiration = credentials['Expiration'].strftime("%Y-%m-%d %H:%M:%S UTC")
 
-    try:
-        response = iam.create_access_key(UserName=user_name)
-        access_key = response['AccessKey']['AccessKeyId']
-        secret_key = response['AccessKey']['SecretAccessKey']
-
-        iam.attach_user_policy(
-            UserName=user_name,
-            PolicyArn="arn:aws:iam::aws:policy/ReadOnlyAccess"
-        )
-
-        success = send_credentials_via_email(email, access_key, secret_key)
+        success = send_credentials_via_email(email, access_key, secret_key, session_token, expiration)
 
         if success:
-            threading.Thread(target=revoke_aws_access_key, args=(user_name, access_key)).start()
-            return f"✅ AWS CLI access has been emailed to `{email}`."
+            return f"✅ Temporary AWS CLI credentials have been emailed to `{email}` and will expire at {expiration}."
         else:
-            return f"⚠️ User created but failed to email `{email}`. Please check logs."
+            return f"⚠️ Temporary credentials generated but failed to email `{email}`. Please check logs."
 
     except ClientError as e:
-        logging.exception("❌ Error generating access key or attaching policy")
-        return f"❌ Error during AWS access key generation: {e}"
-
-def revoke_aws_access_key(user_name, access_key_id):
-    time.sleep(60)  # Wait for 1 minute
-    try:
-        iam = boto3.client(
-            "iam",
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            region_name=os.getenv("AWS_DEFAULT_REGION")
-        )
-        iam.delete_access_key(UserName=user_name, AccessKeyId=access_key_id)
-        logging.info(f"🔒 Access key {access_key_id} for user {user_name} has been deleted after timeout.")
-    except ClientError as e:
-        logging.exception(f"❌ Failed to delete access key {access_key_id} for user {user_name}")
+        logging.exception("❌ Error generating temporary AWS credentials")
+        return f"❌ Error during AWS temporary credentials generation: {e}"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
