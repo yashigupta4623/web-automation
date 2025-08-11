@@ -8,7 +8,13 @@ import boto3
 from botocore.exceptions import ClientError
 import smtplib
 from email.message import EmailMessage
+import threading
+import json
+
 import time
+
+# Temporary AWS credentials lifetime (in seconds)
+TEMP_USER_LIFETIME_SECONDS = 7200  # 2 hours
 
 # Load environment variables
 load_dotenv()
@@ -190,27 +196,99 @@ Automation Bot
         logging.exception(f"❌ Failed to send email to {to_email}")
         return False
 
+def delete_role_after_delay(role_name, delay_seconds):
+    def delete_role():
+        time.sleep(delay_seconds)
+        aws_session = boto3.Session(
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+            region_name=os.getenv("AWS_DEFAULT_REGION")
+        )
+        iam = aws_session.client("iam")
+        try:
+            # List attached policies
+            attached_policies = iam.list_attached_role_policies(RoleName=role_name)
+            for policy in attached_policies.get('AttachedPolicies', []):
+                policy_arn = policy['PolicyArn']
+                logging.info(f"Detaching policy {policy_arn} from role {role_name}")
+                iam.detach_role_policy(RoleName=role_name, PolicyArn=policy_arn)
+            # Delete the role
+            logging.info(f"Deleting IAM role {role_name}")
+            iam.delete_role(RoleName=role_name)
+            logging.info(f"IAM role {role_name} deleted successfully")
+        except Exception as e:
+            logging.exception(f"Failed to delete IAM role {role_name}: {e}")
+
+    thread = threading.Thread(target=delete_role)
+    thread.daemon = True
+    thread.start()
+
 def create_or_update_aws_user(email, issue_key):
     aws_session = boto3.Session(
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         region_name=os.getenv("AWS_DEFAULT_REGION")
     )
-
+    iam = aws_session.client("iam")
     sts = aws_session.client("sts")
 
+    # Generate unique role name
+    safe_email = email.replace('@', '_').replace('.', '_')
+    role_name = f"{safe_email}_temp_role"
+
+    # Trust policy allowing anyone to assume role (less secure, for testing)
+    trust_policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"AWS": "*"},
+                "Action": "sts:AssumeRole"
+            }
+        ]
+    }
+
     try:
-        response = sts.get_session_token(DurationSeconds=1200)
+        # Create the role
+        logging.info(f"Creating IAM role {role_name}")
+        iam.create_role(
+            RoleName=role_name,
+            AssumeRolePolicyDocument=json.dumps(trust_policy),
+            Description="Temporary role for AWS CLI access via webhook automation"
+        )
+        # Attach ReadOnlyAccess policy
+        logging.info(f"Attaching ReadOnlyAccess policy to role {role_name}")
+        iam.attach_role_policy(
+            RoleName=role_name,
+            PolicyArn="arn:aws:iam::aws:policy/ReadOnlyAccess"
+        )
+
+        # Construct role ARN
+        account_id = sts.get_caller_identity()["Account"]
+        role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
+
+        # Assume the role to get temporary credentials
+        response = sts.assume_role(
+            RoleArn=role_arn,
+            RoleSessionName=f"{safe_email}_session",
+            DurationSeconds=TEMP_USER_LIFETIME_SECONDS
+        )
         credentials = response['Credentials']
         access_key = credentials['AccessKeyId']
         secret_key = credentials['SecretAccessKey']
         session_token = credentials['SessionToken']
         expiration = credentials['Expiration'].strftime("%Y-%m-%d %H:%M:%S UTC")
 
+        # Send credentials via email
         success = send_credentials_via_email(email, access_key, secret_key, session_token, expiration)
 
+        # Start background thread to delete role after delay
+        delete_role_after_delay(role_name, TEMP_USER_LIFETIME_SECONDS)
+
         if success:
-            return f"✅ Temporary AWS CLI credentials have been emailed to `{email}` and will expire at {expiration}."
+            logging.info(f"User {email} will be deleted after {TEMP_USER_LIFETIME_SECONDS} seconds.")
+            return (f"✅ Temporary AWS CLI credentials have been emailed to `{email}` and will expire at {expiration} "
+                    f"(in {TEMP_USER_LIFETIME_SECONDS} seconds). The temporary IAM role `{role_name}` will be deleted after expiration.")
         else:
             return f"⚠️ Temporary credentials generated but failed to email `{email}`. Please check logs."
 
