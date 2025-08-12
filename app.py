@@ -255,6 +255,26 @@ def create_or_update_aws_user(email, issue_key):
                     logging.info(f"Waiting for IAM user {user_name} to propagate...")
                     time.sleep(2)
             user_exists = True
+            # Attach inline policy to allow assume role
+            account_id = sts.get_caller_identity()["Account"]
+            assume_role_policy = {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "sts:AssumeRole",
+                        "Resource": f"arn:aws:iam::{account_id}:role/{role_name}"
+                    }
+                ]
+            }
+            try:
+                iam.put_user_policy(
+                    UserName=user_name,
+                    PolicyName="AllowAssumeTempRole",
+                    PolicyDocument=json.dumps(assume_role_policy)
+                )
+            except Exception as e:
+                logging.exception(f"Failed to attach inline policy to user {user_name}: {e}")
         except Exception as e:
             logging.exception(f"Failed to get or create IAM user {user_name}")
             return f"❌ Error getting or creating IAM user: {e}"
@@ -307,6 +327,8 @@ def create_or_update_aws_user(email, issue_key):
             logging.exception(f"Failed to create access key for user {user_name}")
             return f"❌ Error creating access key for user: {e}"
 
+        time.sleep(5)
+
         # Send the user's credentials (not role credentials) via email
         email_success = send_credentials_via_email(email, new_user_access_key, new_user_secret_key)
 
@@ -324,11 +346,24 @@ def create_or_update_aws_user(email, issue_key):
         )
         new_user_sts = new_user_session.client("sts")
 
-        response = new_user_sts.assume_role(
-            RoleArn=role_arn,
-            RoleSessionName=f"{safe_email}_session",
-            DurationSeconds=min(TEMP_USER_LIFETIME_SECONDS, max_session_duration)
-        )
+        try:
+            response = new_user_sts.assume_role(
+                RoleArn=role_arn,
+                RoleSessionName=f"{safe_email}_session",
+                DurationSeconds=min(TEMP_USER_LIFETIME_SECONDS, max_session_duration)
+            )
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'InvalidClientTokenId':
+                logging.warning("AssumeRole failed with InvalidClientTokenId, retrying after delay...")
+                time.sleep(5)
+                response = new_user_sts.assume_role(
+                    RoleArn=role_arn,
+                    RoleSessionName=f"{safe_email}_session",
+                    DurationSeconds=min(TEMP_USER_LIFETIME_SECONDS, max_session_duration)
+                )
+            else:
+                raise
+
         credentials = response['Credentials']
         temp_access_key = credentials['AccessKeyId']
         temp_secret_key = credentials['SecretAccessKey']
