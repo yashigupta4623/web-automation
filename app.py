@@ -255,29 +255,30 @@ def create_or_update_aws_user(email, issue_key):
                     logging.info(f"Waiting for IAM user {user_name} to propagate...")
                     time.sleep(2)
             user_exists = True
-            # Attach inline policy to allow assume role
-            account_id = sts.get_caller_identity()["Account"]
-            assume_role_policy = {
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Action": "sts:AssumeRole",
-                        "Resource": f"arn:aws:iam::{account_id}:role/{role_name}"
-                    }
-                ]
-            }
-            try:
-                iam.put_user_policy(
-                    UserName=user_name,
-                    PolicyName="AllowAssumeTempRole",
-                    PolicyDocument=json.dumps(assume_role_policy)
-                )
-            except Exception as e:
-                logging.exception(f"Failed to attach inline policy to user {user_name}: {e}")
         except Exception as e:
             logging.exception(f"Failed to get or create IAM user {user_name}")
             return f"❌ Error getting or creating IAM user: {e}"
+
+        # Attach inline policy to allow the user to assume their corresponding role
+        account_id = sts.get_caller_identity()["Account"]
+        assume_role_permission_policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Action": "sts:AssumeRole",
+                    "Resource": f"arn:aws:iam::{account_id}:role/{role_name}"
+                }
+            ]
+        }
+        try:
+            iam.put_user_policy(
+                UserName=user_name,
+                PolicyName="AllowUserToAssumeRole",
+                PolicyDocument=json.dumps(assume_role_permission_policy)
+            )
+        except Exception as e:
+            logging.exception(f"Failed to attach inline policy to user {user_name}: {e}")
 
         # 2. Delete any existing IAM role for the email before creating a new one
         try:
