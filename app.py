@@ -252,32 +252,44 @@ def create_or_update_aws_user(email, issue_key):
     }
 
     try:
-        # Log the caller ARN used in the trust policy
-        logging.info(f"Using caller ARN {caller_arn} as principal in trust policy for role {role_name}")
-        # Create the role
-        logging.info(f"Creating IAM role {role_name}")
+        # Check if role exists, if yes delete it first
+        try:
+            iam.get_role(RoleName=role_name)
+            # Detach attached policies
+            attached_policies = iam.list_attached_role_policies(RoleName=role_name)
+            for policy in attached_policies.get('AttachedPolicies', []):
+                iam.detach_role_policy(RoleName=role_name, PolicyArn=policy['PolicyArn'])
+            iam.delete_role(RoleName=role_name)
+            # Wait for deletion to propagate
+            time.sleep(5)
+        except iam.exceptions.NoSuchEntityException:
+            pass
+
+        # Create role
         iam.create_role(
             RoleName=role_name,
             AssumeRolePolicyDocument=json.dumps(trust_policy),
             Description="Temporary role for AWS CLI access via webhook automation"
         )
+        # Wait after creation to avoid eventual consistency issues
+        time.sleep(5)
+
         # Attach ReadOnlyAccess policy
-        logging.info(f"Attaching ReadOnlyAccess policy to role {role_name}")
         iam.attach_role_policy(
             RoleName=role_name,
             PolicyArn="arn:aws:iam::aws:policy/ReadOnlyAccess"
         )
 
-        # Construct role ARN
         account_id = sts.get_caller_identity()["Account"]
         role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
 
-        # Assume the role to get temporary credentials
+        # Assume the role
         response = sts.assume_role(
             RoleArn=role_arn,
             RoleSessionName=f"{safe_email}_session",
             DurationSeconds=TEMP_USER_LIFETIME_SECONDS
         )
+
         credentials = response['Credentials']
         access_key = credentials['AccessKeyId']
         secret_key = credentials['SecretAccessKey']
@@ -287,11 +299,10 @@ def create_or_update_aws_user(email, issue_key):
         # Send credentials via email
         success = send_credentials_via_email(email, access_key, secret_key, session_token, expiration)
 
-        # Start background thread to delete role after delay
+        # Schedule role deletion
         delete_role_after_delay(role_name, TEMP_USER_LIFETIME_SECONDS)
 
         if success:
-            logging.info(f"User {email} will be deleted after {TEMP_USER_LIFETIME_SECONDS} seconds.")
             return (f"✅ Temporary AWS CLI credentials have been emailed to `{email}` and will expire at {expiration} "
                     f"(in {TEMP_USER_LIFETIME_SECONDS} seconds). The temporary IAM role `{role_name}` will be deleted after expiration.")
         else:
