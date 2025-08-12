@@ -269,7 +269,8 @@ def create_or_update_aws_user(email, issue_key):
         iam.create_role(
             RoleName=role_name,
             AssumeRolePolicyDocument=json.dumps(trust_policy),
-            Description="Temporary role for AWS CLI access via webhook automation"
+            Description="Temporary role for AWS CLI access via webhook automation",
+            MaxSessionDuration=TEMP_USER_LIFETIME_SECONDS
         )
         # Wait after creation to avoid eventual consistency issues
         time.sleep(5)
