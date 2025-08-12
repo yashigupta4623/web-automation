@@ -246,6 +246,14 @@ def create_or_update_aws_user(email, issue_key):
         except iam.exceptions.NoSuchEntityException:
             # Create the user
             iam.create_user(UserName=user_name)
+            # Wait until the user is available (IAM eventual consistency)
+            for _ in range(5):
+                try:
+                    iam.get_user(UserName=user_name)
+                    break
+                except iam.exceptions.NoSuchEntityException:
+                    logging.info(f"Waiting for IAM user {user_name} to propagate...")
+                    time.sleep(2)
             user_exists = True
         except Exception as e:
             logging.exception(f"Failed to get or create IAM user {user_name}")
