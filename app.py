@@ -235,19 +235,17 @@ def create_or_update_aws_user(email, issue_key):
     # Generate unique names
     safe_email = email.replace('@', '_').replace('.', '_')
     role_name = f"{safe_email}_temp_role"
-    user_name = email
+    user_name = email.replace('@', '_').replace('.', '_')
 
     try:
         # 1. Check if IAM user exists, else create it
         user_exists = False
         try:
-            user_resp = iam.get_user(UserName=user_name)
+            iam.get_user(UserName=user_name)
             user_exists = True
-            iam_user_arn = user_resp['User']['Arn']
         except iam.exceptions.NoSuchEntityException:
             # Create the user
-            user_resp = iam.create_user(UserName=user_name)
-            iam_user_arn = user_resp['User']['Arn']
+            iam.create_user(UserName=user_name)
             user_exists = True
         except Exception as e:
             logging.exception(f"Failed to get or create IAM user {user_name}")
@@ -265,6 +263,7 @@ def create_or_update_aws_user(email, issue_key):
             pass
 
         # 3. Create trust policy with the user's ARN
+        iam_user_arn = f"arn:aws:iam::{sts.get_caller_identity()['Account']}:user/{user_name}"
         trust_policy = {
             "Version": "2012-10-17",
             "Statement": [
@@ -294,8 +293,8 @@ def create_or_update_aws_user(email, issue_key):
         # 6. Create access keys for the IAM user (always create, not reuse)
         try:
             access_key_resp = iam.create_access_key(UserName=user_name)
-            user_access_key = access_key_resp['AccessKey']['AccessKeyId']
-            user_secret_key = access_key_resp['AccessKey']['SecretAccessKey']
+            user_access_key = access_key_resp['AccessKeyId']
+            user_secret_key = access_key_resp['SecretAccessKey']
         except ClientError as e:
             logging.exception(f"Failed to create access key for user {user_name}")
             return f"❌ Error creating access key for user: {e}"
