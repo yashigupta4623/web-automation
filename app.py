@@ -293,8 +293,8 @@ def create_or_update_aws_user(email, issue_key):
         # 6. Create access keys for the IAM user (always create, not reuse)
         try:
             access_key_resp = iam.create_access_key(UserName=user_name)
-            user_access_key = access_key_resp['AccessKeyId']
-            user_secret_key = access_key_resp['SecretAccessKey']
+            user_access_key = access_key_resp['AccessKey']['AccessKeyId']
+            user_secret_key = access_key_resp['AccessKey']['SecretAccessKey']
         except ClientError as e:
             logging.exception(f"Failed to create access key for user {user_name}")
             return f"❌ Error creating access key for user: {e}"
