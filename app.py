@@ -284,11 +284,15 @@ def create_or_update_aws_user(email, issue_key):
         account_id = sts.get_caller_identity()["Account"]
         role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
 
+        # Get actual MaxSessionDuration of the role
+        role_details = iam.get_role(RoleName=role_name)
+        max_session_duration = role_details['Role']['MaxSessionDuration']
+
         # Assume the role
         response = sts.assume_role(
             RoleArn=role_arn,
             RoleSessionName=f"{safe_email}_session",
-            DurationSeconds=TEMP_USER_LIFETIME_SECONDS
+            DurationSeconds=min(TEMP_USER_LIFETIME_SECONDS, max_session_duration)
         )
 
         credentials = response['Credentials']
