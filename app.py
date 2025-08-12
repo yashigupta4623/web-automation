@@ -236,16 +236,16 @@ def create_or_update_aws_user(email, issue_key):
     safe_email = email.replace('@', '_').replace('.', '_')
     role_name = f"{safe_email}_temp_role"
 
-    # Get caller ARN for trust policy
-    caller_arn = sts.get_caller_identity()["Arn"]
+    # Use fixed IAM user ARN instead of dynamic caller ARN
+    iam_user_arn = "arn:aws:iam::911670809731:user/yashi.gupta@sportsbaazi.com"
 
-    # Trust policy allowing only the caller to assume the role
+    # Trust policy allowing only the IAM user to assume the role
     trust_policy = {
         "Version": "2012-10-17",
         "Statement": [
             {
                 "Effect": "Allow",
-                "Principal": {"AWS": caller_arn},
+                "Principal": {"AWS": iam_user_arn},
                 "Action": "sts:AssumeRole"
             }
         ]
