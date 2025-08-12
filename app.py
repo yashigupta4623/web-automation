@@ -262,7 +262,7 @@ def create_or_update_aws_user(email, issue_key):
         except iam.exceptions.NoSuchEntityException:
             pass
 
-        # 3. Create trust policy with the user's ARN
+        # 3. Create trust policy with the user's ARN (dynamically get account id)
         iam_user_arn = f"arn:aws:iam::{sts.get_caller_identity()['Account']}:user/{user_name}"
         trust_policy = {
             "Version": "2012-10-17",
