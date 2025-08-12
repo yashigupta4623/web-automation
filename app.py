@@ -234,8 +234,8 @@ def create_or_update_aws_user(email, issue_key):
 
     # Generate unique names
     safe_email = email.replace('@', '_').replace('.', '_')
+    user_name = safe_email
     role_name = f"{safe_email}_temp_role"
-    user_name = email.replace('@', '_').replace('.', '_')
 
     try:
         # 1. Check if IAM user exists, else create it
@@ -293,33 +293,42 @@ def create_or_update_aws_user(email, issue_key):
         # 6. Create access keys for the IAM user (always create, not reuse)
         try:
             access_key_resp = iam.create_access_key(UserName=user_name)
-            user_access_key = access_key_resp['AccessKey']['AccessKeyId']
-            user_secret_key = access_key_resp['AccessKey']['SecretAccessKey']
+            new_user_access_key = access_key_resp['AccessKey']['AccessKeyId']
+            new_user_secret_key = access_key_resp['AccessKey']['SecretAccessKey']
         except ClientError as e:
             logging.exception(f"Failed to create access key for user {user_name}")
             return f"❌ Error creating access key for user: {e}"
 
         # Send the user's credentials (not role credentials) via email
-        email_success = send_credentials_via_email(email, user_access_key, user_secret_key)
+        email_success = send_credentials_via_email(email, new_user_access_key, new_user_secret_key)
 
         # Now, continue with the rest of the flow: assume role, email credentials, schedule deletion
         account_id = sts.get_caller_identity()["Account"]
         role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
         role_details = iam.get_role(RoleName=role_name)
         max_session_duration = role_details['Role']['MaxSessionDuration']
-        response = sts.assume_role(
+
+        # Create a new session and STS client for the user (generalized variable names)
+        new_user_session = boto3.Session(
+            aws_access_key_id=new_user_access_key,
+            aws_secret_access_key=new_user_secret_key,
+            region_name=os.getenv("AWS_DEFAULT_REGION")
+        )
+        new_user_sts = new_user_session.client("sts")
+
+        response = new_user_sts.assume_role(
             RoleArn=role_arn,
             RoleSessionName=f"{safe_email}_session",
             DurationSeconds=min(TEMP_USER_LIFETIME_SECONDS, max_session_duration)
         )
         credentials = response['Credentials']
-        access_key = credentials['AccessKeyId']
-        secret_key = credentials['SecretAccessKey']
-        session_token = credentials['SessionToken']
+        temp_access_key = credentials['AccessKeyId']
+        temp_secret_key = credentials['SecretAccessKey']
+        temp_session_token = credentials['SessionToken']
         expiration = credentials['Expiration'].strftime("%Y-%m-%d %H:%M:%S UTC")
 
         # Email the temporary credentials as well (optional, or you may combine messaging)
-        send_credentials_via_email(email, access_key, secret_key, session_token, expiration)
+        send_credentials_via_email(email, temp_access_key, temp_secret_key, temp_session_token, expiration)
 
         # Schedule role deletion
         delete_role_after_delay(role_name, TEMP_USER_LIFETIME_SECONDS)
