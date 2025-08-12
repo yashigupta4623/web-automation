@@ -329,10 +329,8 @@ def create_or_update_aws_user(email, issue_key):
 
         time.sleep(5)
 
-        # Send the user's credentials (not role credentials) via email
-        email_success = send_credentials_via_email(email, new_user_access_key, new_user_secret_key)
 
-        # Now, continue with the rest of the flow: assume role, email credentials, schedule deletion
+        # Now, continue with the rest of the flow: assume role, schedule deletion
         account_id = sts.get_caller_identity()["Account"]
         role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
         role_details = iam.get_role(RoleName=role_name)
@@ -370,17 +368,12 @@ def create_or_update_aws_user(email, issue_key):
         temp_session_token = credentials['SessionToken']
         expiration = credentials['Expiration'].strftime("%Y-%m-%d %H:%M:%S UTC")
 
-        # Email the temporary credentials as well (optional, or you may combine messaging)
-        send_credentials_via_email(email, temp_access_key, temp_secret_key, temp_session_token, expiration)
 
         # Schedule role deletion
         delete_role_after_delay(role_name, TEMP_USER_LIFETIME_SECONDS)
 
-        if email_success:
-            return (f"✅ AWS CLI user credentials and temporary role credentials have been emailed to `{email}`. "
-                    f"The temporary IAM role `{role_name}` will be deleted after expiration at {expiration}.")
-        else:
-            return f"⚠️ Temporary credentials generated but failed to email `{email}`. Please check logs."
+        return (f"✅ AWS CLI user credentials and temporary role credentials have been generated for `{email}`. "
+                f"The temporary IAM role `{role_name}` will be deleted after expiration at {expiration}.")
 
     except ClientError as e:
         logging.exception("❌ Error generating temporary AWS credentials")
