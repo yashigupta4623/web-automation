@@ -12,9 +12,10 @@ import threading
 import json
 
 import time
+from datetime import datetime, timedelta
 
 # Temporary AWS credentials lifetime (in seconds)
-TEMP_USER_LIFETIME_SECONDS = 7200  # 2 hours
+TEMP_USER_LIFETIME_SECONDS = 1800  # 30 minutes
 
 # Load environment variables
 load_dotenv()
@@ -293,13 +294,20 @@ def create_or_update_aws_user(email, issue_key):
 
         # 3. Create trust policy with the user's ARN (dynamically get account id)
         iam_user_arn = f"arn:aws:iam::{sts.get_caller_identity()['Account']}:user/{user_name}"
+        expiration_time = datetime.utcnow() + timedelta(seconds=TEMP_USER_LIFETIME_SECONDS)
+        expiration_time_string = expiration_time.strftime('%Y-%m-%dT%H:%M:%SZ')
         trust_policy = {
             "Version": "2012-10-17",
             "Statement": [
                 {
                     "Effect": "Allow",
                     "Principal": {"AWS": iam_user_arn},
-                    "Action": "sts:AssumeRole"
+                    "Action": "sts:AssumeRole",
+                    "Condition": {
+                        "DateLessThan": {
+                            "aws:CurrentTime": expiration_time_string
+                        }
+                    }
                 }
             ]
         }
@@ -374,7 +382,7 @@ def create_or_update_aws_user(email, issue_key):
         delete_role_after_delay(role_name, TEMP_USER_LIFETIME_SECONDS)
 
         return (f"✅ AWS CLI user credentials and temporary role credentials have been generated for `{email}`. "
-                f"The temporary IAM role `{role_name}` will be deleted after expiration at {expiration}.")
+                f"The temporary IAM role `{role_name}` will be deleted after 30 minutes (at {expiration}).")
 
     except ClientError as e:
         logging.exception("❌ Error generating temporary AWS credentials")
