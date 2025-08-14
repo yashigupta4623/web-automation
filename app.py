@@ -12,7 +12,7 @@ import threading
 import json
 
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Temporary AWS credentials lifetime (in seconds)
 TEMP_USER_LIFETIME_SECONDS = 1800  # 30 minutes
@@ -375,7 +375,6 @@ def create_or_update_aws_user(email, issue_key):
         temp_access_key = credentials['AccessKeyId']
         temp_secret_key = credentials['SecretAccessKey']
         temp_session_token = credentials['SessionToken']
-        from datetime import timezone, timedelta
         ist_time = credentials['Expiration'].astimezone(timezone(timedelta(hours=5, minutes=30)))
         expiration = ist_time.strftime("%Y-%m-%d %H:%M:%S IST")
 
