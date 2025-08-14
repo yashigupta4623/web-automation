@@ -22,10 +22,13 @@ load_dotenv()
 
 # Logging setup
 logging.basicConfig(
-    filename="webhook_test.log",
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.FileHandler("webhook_test.log"),
+        logging.StreamHandler()
+    ]
 )
 
 app = Flask(__name__)
