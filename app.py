@@ -375,7 +375,9 @@ def create_or_update_aws_user(email, issue_key):
         temp_access_key = credentials['AccessKeyId']
         temp_secret_key = credentials['SecretAccessKey']
         temp_session_token = credentials['SessionToken']
-        expiration = credentials['Expiration'].strftime("%Y-%m-%d %H:%M:%S UTC")
+        from datetime import timezone, timedelta
+        ist_time = credentials['Expiration'].astimezone(timezone(timedelta(hours=5, minutes=30)))
+        expiration = ist_time.strftime("%Y-%m-%d %H:%M:%S IST")
 
 
         # Schedule role deletion
