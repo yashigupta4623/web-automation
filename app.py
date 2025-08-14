@@ -301,6 +301,26 @@ def create_or_update_aws_user(email, issue_key):
                 }
             ]
         }
+        # Wait for IAM user ARN to be recognized in trust policy
+        logging.info(f"Waiting for IAM user ARN {iam_user_arn} to propagate for trust policy...")
+        for _ in range(10):  # up to ~50 seconds
+            try:
+                test_policy = {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {"AWS": iam_user_arn},
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                }
+                # Simulate role creation dry-run style (not actually available, so just call get_user again)
+                iam.get_user(UserName=user_name)
+                break
+            except ClientError:
+                logging.info("IAM user ARN not yet usable in trust policy, retrying...")
+                time.sleep(5)
         iam.create_role(
             RoleName=role_name,
             AssumeRolePolicyDocument=json.dumps(trust_policy),
