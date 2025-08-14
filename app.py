@@ -233,21 +233,17 @@ def create_or_update_aws_user(email, issue_key):
     iam = aws_session.client("iam")
     sts = aws_session.client("sts")
 
-    # Generate unique names
     safe_email = email.replace('@', '_').replace('.', '_')
     user_name = safe_email
     role_name = f"{safe_email}_temp_role"
 
     try:
-        # 1. Check if IAM user exists, else create it
-        user_exists = False
+        # 1️⃣ Ensure IAM user exists
         try:
             iam.get_user(UserName=user_name)
-            user_exists = True
         except iam.exceptions.NoSuchEntityException:
-            # Create the user
             iam.create_user(UserName=user_name)
-            # Wait until the user is available (IAM eventual consistency)
+            # Wait until the user is propagated
             for _ in range(5):
                 try:
                     iam.get_user(UserName=user_name)
@@ -255,14 +251,10 @@ def create_or_update_aws_user(email, issue_key):
                 except iam.exceptions.NoSuchEntityException:
                     logging.info(f"Waiting for IAM user {user_name} to propagate...")
                     time.sleep(2)
-            user_exists = True
-        except Exception as e:
-            logging.exception(f"Failed to get or create IAM user {user_name}")
-            return f"❌ Error getting or creating IAM user: {e}"
 
-        # Attach inline policy to allow the user to assume their corresponding role
+        # 2️⃣ Attach inline policy to allow assume-role
         account_id = sts.get_caller_identity()["Account"]
-        assume_role_permission_policy = {
+        assume_role_policy = {
             "Version": "2012-10-17",
             "Statement": [
                 {
@@ -272,16 +264,13 @@ def create_or_update_aws_user(email, issue_key):
                 }
             ]
         }
-        try:
-            iam.put_user_policy(
-                UserName=user_name,
-                PolicyName="AllowUserToAssumeRole",
-                PolicyDocument=json.dumps(assume_role_permission_policy)
-            )
-        except Exception as e:
-            logging.exception(f"Failed to attach inline policy to user {user_name}: {e}")
+        iam.put_user_policy(
+            UserName=user_name,
+            PolicyName="AllowUserToAssumeRole",
+            PolicyDocument=json.dumps(assume_role_policy)
+        )
 
-        # 2. Delete any existing IAM role for the email before creating a new one
+        # 3️⃣ Delete existing role if present
         try:
             iam.get_role(RoleName=role_name)
             attached_policies = iam.list_attached_role_policies(RoleName=role_name)
@@ -292,8 +281,8 @@ def create_or_update_aws_user(email, issue_key):
         except iam.exceptions.NoSuchEntityException:
             pass
 
-        # 3. Create trust policy with the user's ARN (dynamically get account id)
-        iam_user_arn = f"arn:aws:iam::{sts.get_caller_identity()['Account']}:user/{user_name}"
+        # 4️⃣ Create new role with **current user ARN** as principal
+        current_user_arn = sts.get_caller_identity()["Arn"]
         expiration_time = datetime.utcnow() + timedelta(seconds=TEMP_USER_LIFETIME_SECONDS)
         expiration_time_string = expiration_time.strftime('%Y-%m-%dT%H:%M:%SZ')
         trust_policy = {
@@ -301,89 +290,54 @@ def create_or_update_aws_user(email, issue_key):
             "Statement": [
                 {
                     "Effect": "Allow",
-                    "Principal": {"AWS": iam_user_arn},
+                    "Principal": {"AWS": current_user_arn},
                     "Action": "sts:AssumeRole",
                     "Condition": {
-                        "DateLessThan": {
-                            "aws:CurrentTime": expiration_time_string
-                        }
+                        "DateLessThan": {"aws:CurrentTime": expiration_time_string}
                     }
                 }
             ]
         }
-
-        # 4. Create the new IAM role
         iam.create_role(
             RoleName=role_name,
             AssumeRolePolicyDocument=json.dumps(trust_policy),
             Description="Temporary role for AWS CLI access via webhook automation",
-            MaxSessionDuration=3600  # AWS minimum allowed value
+            MaxSessionDuration=3600
         )
         time.sleep(5)
 
-        # 5. Attach ReadOnlyAccess policy to the role
+        # 5️⃣ Attach ReadOnlyAccess to role
         iam.attach_role_policy(
             RoleName=role_name,
             PolicyArn="arn:aws:iam::aws:policy/ReadOnlyAccess"
         )
 
-        # 6. Create access keys for the IAM user (always create, not reuse)
-        try:
-            access_key_resp = iam.create_access_key(UserName=user_name)
-            new_user_access_key = access_key_resp['AccessKey']['AccessKeyId']
-            new_user_secret_key = access_key_resp['AccessKey']['SecretAccessKey']
-        except ClientError as e:
-            logging.exception(f"Failed to create access key for user {user_name}")
-            return f"❌ Error creating access key for user: {e}"
+        # 6️⃣ Create access keys for IAM user
+        access_key_resp = iam.create_access_key(UserName=user_name)
+        access_key = access_key_resp['AccessKey']['AccessKeyId']
+        secret_key = access_key_resp['AccessKey']['SecretAccessKey']
 
-        time.sleep(5)
-
-
-        # Now, continue with the rest of the flow: assume role, schedule deletion
-        account_id = sts.get_caller_identity()["Account"]
+        # 7️⃣ Assume role using the new temporary role
         role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
-        role_details = iam.get_role(RoleName=role_name)
-        max_session_duration = role_details['Role']['MaxSessionDuration']
-
-        # Create a new session and STS client for the user (generalized variable names)
-        new_user_session = boto3.Session(
-            aws_access_key_id=new_user_access_key,
-            aws_secret_access_key=new_user_secret_key,
+        new_user_sts = boto3.Session(
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
             region_name=os.getenv("AWS_DEFAULT_REGION")
+        ).client("sts")
+        resp = new_user_sts.assume_role(
+            RoleArn=role_arn,
+            RoleSessionName=f"{safe_email}_session",
+            DurationSeconds=TEMP_USER_LIFETIME_SECONDS
         )
-        new_user_sts = new_user_session.client("sts")
+        credentials = resp['Credentials']
+        ist_expiration = credentials['Expiration'].astimezone(timezone(timedelta(hours=5, minutes=30)))
+        expiration_str = ist_expiration.strftime("%Y-%m-%d %H:%M:%S IST")
 
-        try:
-            response = new_user_sts.assume_role(
-                RoleArn=role_arn,
-                RoleSessionName=f"{safe_email}_session",
-                DurationSeconds=min(TEMP_USER_LIFETIME_SECONDS, max_session_duration)
-            )
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'InvalidClientTokenId':
-                logging.warning("AssumeRole failed with InvalidClientTokenId, retrying after delay...")
-                time.sleep(5)
-                response = new_user_sts.assume_role(
-                    RoleArn=role_arn,
-                    RoleSessionName=f"{safe_email}_session",
-                    DurationSeconds=min(TEMP_USER_LIFETIME_SECONDS, max_session_duration)
-                )
-            else:
-                raise
-
-        credentials = response['Credentials']
-        temp_access_key = credentials['AccessKeyId']
-        temp_secret_key = credentials['SecretAccessKey']
-        temp_session_token = credentials['SessionToken']
-        ist_time = credentials['Expiration'].astimezone(timezone(timedelta(hours=5, minutes=30)))
-        expiration = ist_time.strftime("%Y-%m-%d %H:%M:%S IST")
-
-
-        # Schedule role deletion
+        # 8️⃣ Schedule role deletion
         delete_role_after_delay(role_name, TEMP_USER_LIFETIME_SECONDS)
 
         return (f"✅ AWS CLI user credentials and temporary role credentials have been generated for `{email}`. "
-                f"The temporary IAM role `{role_name}` will be deleted after 30 minutes (at {expiration}).")
+                f"The temporary IAM role `{role_name}` will be deleted after 30 minutes (at {expiration_str}).")
 
     except ClientError as e:
         logging.exception("❌ Error generating temporary AWS credentials")
