@@ -443,8 +443,22 @@ def cleanup_expired_roles():
     except Exception as e:
         logging.exception(f"Failed to list roles for cleanup: {e}")
 
+def periodic_cleanup_thread():
+    """Run cleanup_expired_roles every 5 minutes"""
+    while True:
+        try:
+            cleanup_expired_roles()
+        except Exception as e:
+            logging.exception("Exception in periodic cleanup thread")
+        time.sleep(600)  # every 10 minutes
+
+# Start the thread
+cleanup_thread = threading.Thread(target=periodic_cleanup_thread)
+cleanup_thread.daemon = True
+cleanup_thread.start()
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     logging.info(f"🚀 Starting server on port {port}")
-    cleanup_expired_roles()
+    cleanup_expired_roles()  # Initial cleanup
     app.run(debug=True, host="0.0.0.0", port=port)
