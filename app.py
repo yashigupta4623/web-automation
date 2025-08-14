@@ -389,7 +389,62 @@ def create_or_update_aws_user(email, issue_key):
         logging.exception("❌ Error generating temporary AWS credentials")
         return f"❌ Error during AWS temporary credentials generation: {e}"
 
+def cleanup_expired_roles():
+    logging.info("Starting cleanup of expired IAM roles")
+    aws_session = boto3.Session(
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        region_name=os.getenv("AWS_DEFAULT_REGION")
+    )
+    iam = aws_session.client("iam")
+    sts = aws_session.client("sts")
+    account_id = sts.get_caller_identity()["Account"]
+
+    try:
+        paginator = iam.get_paginator('list_roles')
+        for page in paginator.paginate():
+            for role in page['Roles']:
+                role_name = role['RoleName']
+                if role_name.endswith('_temp_role'):
+                    # Get the AssumeRolePolicyDocument
+                    try:
+                        role_detail = iam.get_role(RoleName=role_name)
+                        assume_role_policy_doc = role_detail['Role']['AssumeRolePolicyDocument']
+                        # Check for DateLessThan condition
+                        statements = assume_role_policy_doc.get('Statement', [])
+                        expiration_str = None
+                        for stmt in statements:
+                            condition = stmt.get('Condition', {})
+                            date_less_than = condition.get('DateLessThan', {})
+                            expiration_str = date_less_than.get('aws:CurrentTime')
+                            if expiration_str:
+                                break
+                        if not expiration_str:
+                            logging.warning(f"No expiration found in trust policy for role {role_name}. Skipping.")
+                            continue
+                        # Parse expiration time
+                        expiration_time = datetime.strptime(expiration_str, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+                        current_time = datetime.utcnow().replace(tzinfo=timezone.utc)
+                        if current_time > expiration_time:
+                            logging.info(f"Role {role_name} has expired (expiration: {expiration_str}). Deleting.")
+                            # Detach attached policies
+                            attached_policies = iam.list_attached_role_policies(RoleName=role_name)
+                            for policy in attached_policies.get('AttachedPolicies', []):
+                                policy_arn = policy['PolicyArn']
+                                logging.info(f"Detaching policy {policy_arn} from role {role_name}")
+                                iam.detach_role_policy(RoleName=role_name, PolicyArn=policy_arn)
+                            # Delete the role
+                            iam.delete_role(RoleName=role_name)
+                            logging.info(f"Deleted expired role {role_name}")
+                        else:
+                            logging.info(f"Role {role_name} not expired yet (expiration: {expiration_str})")
+                    except Exception as e:
+                        logging.exception(f"Error processing role {role_name}: {e}")
+    except Exception as e:
+        logging.exception(f"Failed to list roles for cleanup: {e}")
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     logging.info(f"🚀 Starting server on port {port}")
+    cleanup_expired_roles()
     app.run(debug=True, host="0.0.0.0", port=port)
