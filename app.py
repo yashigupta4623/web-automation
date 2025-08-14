@@ -420,7 +420,7 @@ def cleanup_expired_roles():
                         # Parse expiration time
                         expiration_time = datetime.strptime(expiration_str, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
                         current_time = datetime.now(timezone.utc)
-                        if current_time > expiration_time:
+                        if current_time > (expiration_time - timedelta(minutes=1)):
                             logging.info(f"Role {role_name} has expired (expiration: {expiration_str}). Deleting.")
                             # Detach attached policies
                             attached_policies = iam.list_attached_role_policies(RoleName=role_name)
