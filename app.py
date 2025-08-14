@@ -317,7 +317,7 @@ def create_or_update_aws_user(email, issue_key):
             RoleName=role_name,
             AssumeRolePolicyDocument=json.dumps(trust_policy),
             Description="Temporary role for AWS CLI access via webhook automation",
-            MaxSessionDuration=TEMP_USER_LIFETIME_SECONDS
+            MaxSessionDuration=3600  # AWS minimum allowed value
         )
         time.sleep(5)
 
