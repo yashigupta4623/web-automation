@@ -54,17 +54,23 @@ def handle_webhook():
         token = request.headers.get("X-Webhook-Token")
         if token != WEBHOOK_SECRET:
             logging.warning("❌ Invalid webhook token.")
-            return jsonify({"error": "Unauthorized"}), 401
+            response = jsonify({"error": "Unauthorized"}), 401
+            cleanup_expired_roles(trigger="webhook")
+            return response
 
     if not request.is_json:
         logging.error("❌ Request is not JSON")
-        return jsonify({"error": "Expected application/json"}), 400
+        response = jsonify({"error": "Expected application/json"}), 400
+        cleanup_expired_roles(trigger="webhook")
+        return response
 
     try:
         data = request.get_json()
     except Exception as e:
         logging.error(f"❌ JSON parsing failed: {e}")
-        return jsonify({"error": "Malformed JSON"}), 400
+        response = jsonify({"error": "Malformed JSON"}), 400
+        cleanup_expired_roles(trigger="webhook")
+        return response
 
     issue = data.get("issue", {})
     issue_key = issue.get("key", "UNKNOWN")
@@ -83,13 +89,17 @@ def handle_webhook():
         msg = "❌ Username is missing or invalid."
         logging.warning(msg)
         add_jira_comment(issue_key, msg)
-        return jsonify({"error": msg}), 400
+        response = jsonify({"error": msg}), 400
+        cleanup_expired_roles(trigger="webhook")
+        return response
 
     if not repo_name:
         msg = "❌ Repository name is missing or invalid."
         logging.warning(msg)
         add_jira_comment(issue_key, msg)
-        return jsonify({"error": msg}), 400
+        response = jsonify({"error": msg}), 400
+        cleanup_expired_roles(trigger="webhook")
+        return response
 
     api_url = f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}/{repo_name}/permissions-config/users/{username}"
 
@@ -106,17 +116,21 @@ def handle_webhook():
         if response.status_code in [200, 201, 204]:
             msg = f"✅ Granted `{permission}` access to `{username}` on repo `{repo_name}`."
             add_jira_comment(issue_key, msg)
-            return jsonify({"message": msg}), 200
+            final_response = (jsonify({"message": msg}), 200)
         else:
             msg = f"❌ Failed to grant permission: {response.status_code}, {response.text}"
             add_jira_comment(issue_key, msg)
-            return jsonify({"error": msg}), 400
+            final_response = (jsonify({"error": msg}), 400)
 
     except Exception as e:
         error_msg = f"❌ Exception in Bitbucket call: {e}"
         logging.exception(error_msg)
         add_jira_comment(issue_key, error_msg)
-        return jsonify({"error": error_msg}), 500
+        final_response = (jsonify({"error": error_msg}), 500
+        )
+
+    cleanup_expired_roles(trigger="webhook")
+    return final_response
 
 def add_jira_comment(issue_key, comment):
     if not all([JIRA_BASE_URL, JIRA_AUTH_EMAIL, JIRA_API_TOKEN]):
@@ -384,8 +398,8 @@ def create_or_update_aws_user(email, issue_key):
         logging.exception("❌ Error generating temporary AWS credentials")
         return f"❌ Error during AWS temporary credentials generation: {e}"
 
-def cleanup_expired_roles():
-    logging.info("Starting cleanup of expired IAM roles")
+def cleanup_expired_roles(trigger="thread"):
+    logging.info(f"Starting cleanup of expired IAM roles (triggered by: {trigger})")
     aws_session = boto3.Session(
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
@@ -439,13 +453,13 @@ def cleanup_expired_roles():
         logging.exception(f"Failed to list roles for cleanup: {e}")
 
 def periodic_cleanup_thread():
-    """Run cleanup_expired_roles every 5 minutes"""
+    """Run cleanup_expired_roles every 10 minutes"""
     while True:
         try:
-            cleanup_expired_roles()
+            cleanup_expired_roles(trigger="thread")
         except Exception as e:
             logging.exception("Exception in periodic cleanup thread")
-        time.sleep(600)  # every 10 minutes
+        time.sleep(600)
 
 # Start the thread
 cleanup_thread = threading.Thread(target=periodic_cleanup_thread)
@@ -455,5 +469,12 @@ cleanup_thread.start()
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     logging.info(f"🚀 Starting server on port {port}")
-    cleanup_expired_roles()  # Initial cleanup
+
+    # Initial cleanup at startup
+    cleanup_expired_roles(trigger="startup")
+
+    # Start periodic cleanup thread
+    thread = threading.Thread(target=periodic_cleanup_thread, daemon=True)
+    thread.start()
+
     app.run(debug=True, host="0.0.0.0", port=port)
