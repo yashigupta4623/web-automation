@@ -283,7 +283,7 @@ def create_or_update_aws_user(email, issue_key):
 
         # 4️⃣ Create new role with **IAM user ARN** as principal
         iam_user_arn = f"arn:aws:iam::{account_id}:user/{user_name}"
-        expiration_time = datetime.utcnow() + timedelta(seconds=TEMP_USER_LIFETIME_SECONDS)
+        expiration_time = datetime.now(timezone.utc) + timedelta(seconds=TEMP_USER_LIFETIME_SECONDS)
         expiration_time_string = expiration_time.strftime('%Y-%m-%dT%H:%M:%SZ')
         trust_policy = {
             "Version": "2012-10-17",
