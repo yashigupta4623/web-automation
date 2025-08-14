@@ -317,6 +317,20 @@ def create_or_update_aws_user(email, issue_key):
         access_key = access_key_resp['AccessKey']['AccessKeyId']
         secret_key = access_key_resp['AccessKey']['SecretAccessKey']
 
+        # Wait until the access key is valid (IAM eventual consistency)
+        for _ in range(5):
+            sts_test = boto3.Session(
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                region_name=os.getenv("AWS_DEFAULT_REGION")
+            ).client("sts")
+            try:
+                sts_test.get_caller_identity()
+                break
+            except ClientError:
+                logging.info("Waiting for IAM access key to propagate...")
+                time.sleep(2)
+
         # 7️⃣ Assume role using the new temporary role
         role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
         new_user_sts = boto3.Session(
