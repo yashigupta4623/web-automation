@@ -392,7 +392,7 @@ def cleanup_expired_roles():
                             continue
                         # Parse expiration time
                         expiration_time = datetime.strptime(expiration_str, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
-                        current_time = datetime.utcnow().replace(tzinfo=timezone.utc)
+                        current_time = datetime.now(timezone.utc)
                         if current_time > expiration_time:
                             logging.info(f"Role {role_name} has expired (expiration: {expiration_str}). Deleting.")
                             # Detach attached policies
