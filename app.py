@@ -281,8 +281,8 @@ def create_or_update_aws_user(email, issue_key):
         except iam.exceptions.NoSuchEntityException:
             pass
 
-        # 4️⃣ Create new role with **current user ARN** as principal
-        current_user_arn = sts.get_caller_identity()["Arn"]
+        # 4️⃣ Create new role with **IAM user ARN** as principal
+        iam_user_arn = f"arn:aws:iam::{account_id}:user/{user_name}"
         expiration_time = datetime.utcnow() + timedelta(seconds=TEMP_USER_LIFETIME_SECONDS)
         expiration_time_string = expiration_time.strftime('%Y-%m-%dT%H:%M:%SZ')
         trust_policy = {
@@ -290,7 +290,7 @@ def create_or_update_aws_user(email, issue_key):
             "Statement": [
                 {
                     "Effect": "Allow",
-                    "Principal": {"AWS": current_user_arn},
+                    "Principal": {"AWS": iam_user_arn},
                     "Action": "sts:AssumeRole",
                     "Condition": {
                         "DateLessThan": {"aws:CurrentTime": expiration_time_string}
@@ -318,7 +318,7 @@ def create_or_update_aws_user(email, issue_key):
         secret_key = access_key_resp['AccessKey']['SecretAccessKey']
 
         # Wait until the access key is valid (IAM eventual consistency)
-        for _ in range(5):
+        for _ in range(15):
             sts_test = boto3.Session(
                 aws_access_key_id=access_key,
                 aws_secret_access_key=secret_key,
@@ -329,7 +329,7 @@ def create_or_update_aws_user(email, issue_key):
                 break
             except ClientError:
                 logging.info("Waiting for IAM access key to propagate...")
-                time.sleep(2)
+                time.sleep(4)
 
         # 7️⃣ Assume role using the new temporary role
         role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
