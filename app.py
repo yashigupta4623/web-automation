@@ -83,13 +83,9 @@ def handle_webhook():
     issue = data.get("issue", {})
     issue_key = issue.get("key", "UNKNOWN")
     summary = issue.get("summary", "")
-
-    # ✅ Get reporter email dynamically from webhook payload
-    reporter = issue.get("fields", {}).get("reporter", {})
-    reporter_email = reporter.get("emailAddress", "default_email@sportsbaazi.com")
+    reporter_email = issue.get("reporter", "default_email@sportsbaazi.com")
 
     logging.info(f"Issue: {issue_key}, Summary: {summary}, Reporter: {reporter_email}")
-
     aws_msg = create_or_update_aws_user(reporter_email, issue_key)
     add_jira_comment(issue_key, aws_msg)
 
